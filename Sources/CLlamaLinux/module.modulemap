@@ -1,0 +1,13 @@
+// llama.cpp on Linux: static, CPU backend (scripts/build-llama.sh builds it into Vendor/linux/llama). Named CLlama, like
+// the macOS module, so the Swift code imports one name everywhere.
+module CLlama [system] {
+    header "../../Vendor/linux/llama/include/llama.h"
+    header "../../Vendor/linux/llama/include/mtmd.h"
+    header "../../Vendor/linux/llama/include/mtmd-helper.h"
+    link "llamacpp"
+    link "stdc++"
+    link "m"
+    link "pthread"
+    link "dl"
+    export *
+}

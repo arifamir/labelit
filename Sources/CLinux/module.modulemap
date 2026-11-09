@@ -1,0 +1,5 @@
+// System headers Swift's Glibc module leaves out (extended attributes).
+module CLinux [system] {
+    header "shim.h"
+    export *
+}

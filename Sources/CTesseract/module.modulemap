@@ -1,0 +1,5 @@
+module CTesseract [system] {
+    header "shim.h"
+    link "tesseract"
+    export *
+}

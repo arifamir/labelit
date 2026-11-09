@@ -1,0 +1,9 @@
+.build/
+build/
+*.xcodeproj/
+DerivedData/
+.DS_Store
+Vendor/
+Config/Local.xcconfig
+dist/
+.vscode/

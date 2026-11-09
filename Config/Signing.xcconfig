@@ -1,0 +1,12 @@
+// How the app is signed.
+//
+// Default: ad hoc ("Sign to Run Locally"). It builds and runs on any Mac, but macOS ties permissions
+// (Screen Recording, folders, Automation) to the binary's hash, so it asks again after every rebuild.
+//
+// To keep permissions across rebuilds, sign with your own certificate: copy Local.xcconfig.example to
+// Local.xcconfig (ignored by git) and fill in your team.
+CODE_SIGN_STYLE = Manual
+CODE_SIGN_IDENTITY = -
+DEVELOPMENT_TEAM =
+
+#include? "Local.xcconfig"
