@@ -7,7 +7,8 @@ public enum NamingPrompt {
     You name files on a user's computer so they can find them later. You get facts about one file: \
     what kind it is, which app or website it came from, text read from it, and objects seen in it. \
     Reply with a short, specific name using only those facts. When a window title or website is given, \
-    say which page or app it is; text read from the picture only adds detail. Prefer the most distinctive \
+    say which page or app it is; otherwise start with the screen's main heading when one is given. Other text \
+    read from the picture only adds detail. Prefer the most distinctive \
     subject: the product, site, page, error, merchant, animal or scene. Never invent details.
     """
 
@@ -32,6 +33,10 @@ public enum NamingPrompt {
             let pageWords = Set(Slug.make((context.windowTitle ?? "") + " " + host.replacingOccurrences(of: ".", with: " "),
                                           maxWords: 40, maxLength: 400).split(separator: "-"))
             if !pageWords.isEmpty && pageWords.isDisjoint(with: words) { return false }
+        } else if !facts.isDocument, facts.isScreen, let title = DocumentReading.screenTitle(in: facts.analysis.lines) {
+            // A screen with a clear title: the name must mention it, not a badge or caption elsewhere on screen.
+            let titleWords = Set(DocumentReading.slug(title.heading + " " + (title.subtitle ?? ""), maxWords: 20).split(separator: "-"))
+            if !titleWords.isEmpty && titleWords.isDisjoint(with: words) { return false }
         }
         guard facts.isDocument, let heading = DocumentReading.heading(in: facts.analysis.lines) else { return true }
         let headingWords = Set(DocumentReading.slug(heading, maxWords: 12).split(separator: "-"))
@@ -56,12 +61,17 @@ public enum NamingPrompt {
         }
         lines.append("Kind: \(kindText)")
         if let title = facts.meaningfulTitle { lines.append("Document title: \(title.prefix(150))") }
+        if !facts.isDocument, facts.isScreen, let title = DocumentReading.screenTitle(in: facts.analysis.lines) {
+            lines.append("Main heading: \(title.heading.prefix(120))")
+            if let subtitle = title.subtitle { lines.append("Subheading: \(subtitle.prefix(150))") }
+        }
         if facts.isDocument {
             if let heading = DocumentReading.heading(in: facts.analysis.lines) { lines.append("Main heading: \(heading.prefix(150))") }
             if let type = DocumentReading.type(in: facts.analysis.lines) { lines.append("Document type: \(type)") }
         }
         if let context = facts.context {
-            if let app = context.appName { lines.append("App: \(app)") }
+            // A browser's name says nothing about the page (the model puts "google-chrome" in names): the site does.
+            if let app = context.appName, context.url == nil { lines.append("App: \(app)") }
             if let title = context.windowTitle, !title.isEmpty { lines.append("Window title: \(title.prefix(150))") }
             if let url = context.url { lines.append("Website: \(url.prefix(150))") }
         }

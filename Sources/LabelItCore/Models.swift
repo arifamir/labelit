@@ -39,6 +39,22 @@ public struct CaptureContext: Codable, Sendable, Equatable {
     }
 
     public var isEmpty: Bool { appName == nil && windowTitle == nil && url == nil }
+
+    /// Words a window title can have without saying what's in the window.
+    static let genericTitleWords: Set<String> = ["desktop", "downloads", "documents", "pictures", "local", "finder", "home",
+        "recents", "untitled", "new", "tab", "window", "google", "chrome", "safari", "firefox", "edge", "arc", "brave",
+        "the", "and", "for", "with", "from"]
+
+    /// Whether the window's title shows in the picture's text, so the picture is of that window. A macOS screenshot's
+    /// app is the one in front when the file lands, which may be another window (Finder, after a click on the Desktop).
+    public func isShown(in analysis: ImageAnalysis) -> Bool {
+        guard let windowTitle else { return false }
+        let titleWords = Slug.make(windowTitle, maxWords: 30, maxLength: 300).split(separator: "-")
+            .filter { $0.count >= 3 && !Self.genericTitleWords.contains(String($0)) }
+        guard !titleWords.isEmpty else { return false }
+        let seen = Set(Slug.make(analysis.fullText, maxWords: 4000, maxLength: 40000).split(separator: "-"))
+        return titleWords.contains { seen.contains($0) }
+    }
 }
 
 /// Facts read from the file itself (EXIF, QuickTime metadata, extended attributes).

@@ -139,7 +139,9 @@ public struct RuleNamer: Namer {
             let heading = headingSlug(facts, maxWords: 4)
             return [site, heading].filter { !$0.isEmpty }.joined(separator: "-")
         }
-        let heading = headingSlug(facts, maxWords: 5)
+        // The screen's own title (a page's headline and the line under it), when one stands out.
+        let heading = DocumentReading.screenTitle(in: facts.analysis.lines).map { DocumentReading.slug($0) }
+            ?? headingSlug(facts, maxWords: 5)
         let app = appSlug(facts)
         if !heading.isEmpty {
             if let app, !heading.contains(app) { return app + "-" + heading }

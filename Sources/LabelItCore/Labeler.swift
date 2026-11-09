@@ -265,7 +265,7 @@ public actor Labeler {
         }
 
         return Proposal(source: source, kind: result.kind, namer: result.namer, moves: moves,
-                        context: context, whereFroms: whereFroms(for: facts))
+                        context: facts.context, whereFroms: whereFroms(for: facts))
     }
 
     private func gatherFacts(_ url: URL, source: Source, isVideo: Bool, isDocument: Bool,
@@ -275,6 +275,7 @@ public actor Labeler {
         // Screens and pages need resolution for small text; photos don't.
         let image = await reader.picture(of: url, maxPixelSize: isVideo ? 1280 : isScreen ? 3000 : 1600)
         var analysis = if let image { await understanding.analyze(image, readText: true) } else { ImageAnalysis() }
+        analysis.lines = KnownWords.correct(analysis.lines)
         // Camera photos and videos: ask the describer what the picture shows. Not for screens or
         // pictures that are mostly text (documents, receipts), which are named from their text.
         if !isScreen, settings.describePhotos, let describer, let image,
@@ -285,6 +286,10 @@ public actor Labeler {
         if settings.placeNames, [.phone, .finder].contains(source), let lat = metadata.latitude, let lon = metadata.longitude {
             place = await places?.place(latitude: lat, longitude: lon)
         }
+        // A macOS screenshot's context is read when the file lands, by then maybe from another window: it's kept only
+        // when the picture shows that window's title. (⌘⇧1 reads it before the crosshair, so it's kept as read.)
+        var context = context
+        if source == .screenshot, let read = context, !read.isShown(in: analysis) { context = nil }
         return FileFacts(url: url, source: source, isVideo: isVideo, isDocument: isDocument, metadata: metadata, analysis: analysis,
                          context: context, place: place, fileDate: Self.creationDate(url) ?? Date())
     }

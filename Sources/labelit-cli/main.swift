@@ -49,6 +49,7 @@ case "status":
 
 case "name":
     guard let file = args.first.map(path) else { say(usage); exit(1) }
+    guard FileManager.default.fileExists(atPath: file.path) else { say("No such file: \(file.path)"); await finish(1) }
     func option(_ name: String) -> String? { args.firstIndex(of: name).flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil } }
     let context = CaptureContext(appName: option("--app"), windowTitle: option("--title"), url: option("--url"))
     let labeler = Labeler.native(describer: describer, log: RenameLog(fileURL: FileManager.default.temporaryDirectory

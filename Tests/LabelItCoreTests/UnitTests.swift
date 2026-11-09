@@ -297,3 +297,50 @@ final class TempDir {
         #expect(await RuleNamer().name(facts).slug == "github-arifamir-labelit")
     }
 }
+
+@Suite struct ScreenTitleTests {
+    /// Lines of a README screenshot: a big heading, its tagline, then body text, badges and a table.
+    static let readme: [TextLine] = {
+        var lines = [TextLine(text: "LabelIt", height: 0.04, top: 0.17),
+                     TextLine(text: "Screenshots and phone photos, named for what's in them.", height: 0.016, top: 0.25),
+                     TextLine(text: "license MIT macOS 26+ Linux CLI preview Swift 6 AI 100% on-device", height: 0.014, top: 0.37)]
+        for row in 0..<10 {
+            lines.append(TextLine(text: "Before and after example number \(row) in the table", height: 0.015, top: 0.45 + Double(row) * 0.04))
+        }
+        return lines
+    }()
+
+    @Test func theHeadingAndItsTaglineMakeTheName() throws {
+        let title = try #require(DocumentReading.screenTitle(in: Self.readme))
+        #expect(title.heading == "LabelIt")
+        #expect(title.subtitle == "Screenshots and phone photos, named for what's in them.")
+        #expect(DocumentReading.slug(title) == "labelit-screenshots-phone-photos")
+    }
+
+    @Test func evenTextHasNoTitle() {
+        let code = (0..<12).map { TextLine(text: "let value\($0) = compute(\($0))", height: 0.015, top: 0.1 + Double($0) * 0.05) }
+        #expect(DocumentReading.screenTitle(in: code) == nil)
+    }
+
+    @Test func aModelNameMustMentionTheScreensTitle() {
+        let facts = FileFacts(url: URL(fileURLWithPath: "/tmp/s.png"), source: .screenshot, analysis: ImageAnalysis(lines: Self.readme))
+        #expect(!NamingPrompt.isSpecificEnough("linux-cli-preview", for: facts))
+        #expect(NamingPrompt.isSpecificEnough("labelit-readme", for: facts))
+    }
+
+    @Test func anotherWindowsContextIsIgnored() {
+        let analysis = ImageAnalysis(lines: Self.readme)
+        #expect(!CaptureContext(appName: "Finder", windowTitle: "Desktop — Local").isShown(in: analysis))
+        #expect(CaptureContext(appName: "Google Chrome", windowTitle: "arifamir/labelit: Screenshots, AirDropped photos",
+                               url: "https://github.com/arifamir/labelit").isShown(in: analysis))
+    }
+}
+
+@Suite struct KnownWordTests {
+    @Test func aCapitalIReadAsAnLIsFixed() {
+        let fixed = KnownWords.correct([TextLine(text: "Welcome to Labellt on your iPhone", height: 0.02, top: 0.1)])
+        #expect(fixed.first?.text == "Welcome to LabelIt on your iPhone")
+        // Ordinary words that merely look alike stay.
+        #expect(KnownWords.correct([TextLine(text: "Label it", height: 0.02, top: 0.1)]).first?.text == "Label it")
+    }
+}
