@@ -30,7 +30,13 @@ public enum KindDetector {
         let looksLikeDocument = facts.analysis.labels.contains {
             ["document", "printed_page", "paper", "text"].contains($0.name) && $0.confidence > 0.5
         }
-        if wordCount > 60 || (looksLikeDocument && wordCount > 15) { return .document }
+        if wordCount > 60 || (looksLikeDocument && wordCount > 15) {
+            // Lots of text, but the describer sees a thing, not paper: the label on a TV, a router, a washing machine.
+            if let seen = facts.analysis.descriptions.first(where: { $0 != "selfie" }), !PhotoWords.paper.contains(seen) {
+                return .photo
+            }
+            return .document
+        }
         return .photo
     }
 
@@ -177,6 +183,7 @@ public struct RuleNamer: Namer {
             let slug = Slug.make(word.replacingOccurrences(of: "_", with: " "), maxWords: 2, maxLength: 20)
             if !slug.isEmpty && !words.contains(where: { $0.contains(slug) || slug.contains($0) }) { words.append(slug) }
         }
+        if facts.metadata.isFrontCamera && analysis.faceCount > 0 { add("selfie") }
         analysis.animals.forEach(add)
         if analysis.faceCount == 1 && words.isEmpty { add("portrait") }
         if analysis.faceCount == 2 { add("two people") }

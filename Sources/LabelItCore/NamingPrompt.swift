@@ -38,10 +38,29 @@ public enum NamingPrompt {
             let titleWords = Set(DocumentReading.slug(title.heading + " " + (title.subtitle ?? ""), maxWords: 20).split(separator: "-"))
             if !titleWords.isEmpty && titleWords.isDisjoint(with: words) { return false }
         }
+        // A photo's name must say what the describer saw: the model otherwise goes by text on the thing ("candy-hoover-
+        // group" for a washing machine's label). Photographed documents are named from their text instead.
+        let described = (facts.analysis.descriptions + facts.analysis.alternatives).flatMap { $0.split(separator: "-") }
+        if !facts.isScreen, !described.isEmpty, [.photo, .video].contains(KindDetector.detect(facts)),
+           Set(described).isDisjoint(with: words) {
+            return false
+        }
         guard facts.isDocument, let heading = DocumentReading.heading(in: facts.analysis.lines) else { return true }
         let headingWords = Set(DocumentReading.slug(heading, maxWords: 12).split(separator: "-"))
         guard !headingWords.isEmpty else { return true }
         return !headingWords.isDisjoint(with: words)
+    }
+
+    /// A photo name that missed the subject but led with a word printed on the photo (its brand, usually): that word,
+    /// then the describer's subject. "candy-hoover-group-c8te-s" for a washing machine's label → "candy-device-label".
+    public static func brandedSubject(from slug: String, for facts: FileFacts) -> String? {
+        guard let subject = facts.analysis.descriptions.first(where: { $0 != "selfie" }) ?? facts.analysis.descriptions.first,
+              let first = slug.split(separator: "-").first.map(String.init),
+              first.count >= 2, first.count <= 15, first.allSatisfy(\.isLetter), !filler.contains(first),
+              !subject.split(separator: "-").contains(Substring(first)) else { return nil }
+        let textWords = Set(Slug.make(facts.analysis.fullText, maxWords: 400, maxLength: 4000).split(separator: "-"))
+        guard textWords.contains(Substring(first)) else { return nil }
+        return first + "-" + subject
     }
 
     public static func prompt(for facts: FileFacts, kind: FileKind) -> String {
@@ -80,10 +99,17 @@ public enum NamingPrompt {
             // EmbeddingGemma 2's reading is the most reliable fact about a photo; Vision's labels are
             // vaguer ("structure", "machine") and only muddy the name, so they're left out.
             lines.append("Main subject (reliable; base the name on this): \(analysis.descriptions.joined(separator: ", "))")
+            if !analysis.alternatives.isEmpty {
+                lines.append("Could also be: \(analysis.alternatives.joined(separator: ", "))")
+            }
+            if !analysis.lines.isEmpty, [.photo, .video].contains(kind) {
+                lines.append("When the text below clearly names a brand, product or model, put it before the subject.")
+            }
             if !analysis.animals.isEmpty { lines.append("Animals: \(analysis.animals.joined(separator: ", "))") }
         } else {
             if !analysis.animals.isEmpty { lines.append("Animals: \(analysis.animals.joined(separator: ", "))") }
             if analysis.faceCount > 0 { lines.append("People's faces: \(analysis.faceCount)") }
+            if analysis.faceCount > 0, facts.metadata.isFrontCamera { lines.append("Taken with the front camera: a selfie") }
             let labels = analysis.labels
                 .filter { $0.confidence >= 0.3 && !RuleNamer.genericLabels.contains($0.name) }
                 .prefix(6)

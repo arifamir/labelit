@@ -60,7 +60,8 @@ public protocol ImageUnderstanding: Sendable {
 /// Used for camera photos and videos only; screenshots are named from their text.
 /// Returns [] when it has nothing confident to say (or isn't available).
 public protocol PhotoDescriber: Sendable {
-    func describe(_ picture: any Pixels) async -> [String]
+    /// Each group's best matches, ranked; `PhotoWords.choose` picks the words.
+    func describe(_ picture: any Pixels) async -> [PhotoMatch]
 }
 
 /// Turns coordinates into a city name.

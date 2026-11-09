@@ -36,9 +36,12 @@ public enum ModelFiles {
         public var isDigUps: Bool { folder.path.contains("/DigUp/") }
     }
 
-    /// Where LabelIt downloads the files.
+    /// Where LabelIt downloads the files. LABELIT_MODEL_DIR sets another folder (for tests, or a shared disk).
     public static var labelItFolder: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        if let folder = ProcessInfo.processInfo.environment["LABELIT_MODEL_DIR"], !folder.isEmpty {
+            return URL(fileURLWithPath: (folder as NSString).expandingTildeInPath, isDirectory: true)
+        }
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("LabelIt/Models", isDirectory: true)
     }
 
@@ -74,7 +77,40 @@ public enum ModelFiles {
     }
 }
 
+/// Partly downloaded model files, kept beside the model as "<file>.resume" (URLSession's resume data), so a download
+/// that's cut short carries on from where it stopped.
+public struct PartialDownloads: Sendable {
+    public let folder: URL
+
+    public init(folder: URL = ModelFiles.labelItFolder) {
+        self.folder = folder
+    }
+
+    func url(for file: ModelFiles.File) -> URL { folder.appendingPathComponent(file.name + ".resume") }
+
+    public func load(_ file: ModelFiles.File) -> Data? {
+        #if canImport(Darwin)
+        try? Data(contentsOf: url(for: file))
+        #else
+        nil   // swift-corelibs-foundation can't resume downloads
+        #endif
+    }
+
+    public func save(_ data: Data?, for file: ModelFiles.File) {
+        guard let data, !data.isEmpty else { return }
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? data.write(to: url(for: file), options: .atomic)
+    }
+
+    public func discard(_ file: ModelFiles.File) {
+        try? FileManager.default.removeItem(at: url(for: file))
+    }
+}
+
 /// Downloads the model files into LabelIt's folder, checking each file's SHA-256 before it's used.
+///
+/// A download that's cut short keeps what it got: a dropped network is retried a few times, and when the Mac sleeps,
+/// LabelIt quits or the download is cancelled, the next start carries on from the same place.
 public final class ModelDownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     public enum State: Sendable, Equatable {
         case idle
@@ -84,15 +120,25 @@ public final class ModelDownloader: NSObject, URLSessionDownloadDelegate, @unche
         case failed(String)
     }
 
+    /// Waits before each retry after a network error; when they're used up, the download fails (and can be resumed).
+    static let retryDelays: [Double] = [5, 20, 60]
+
     private let onChange: @Sendable (State) -> Void
+    private let partials: PartialDownloads
     private var session: URLSession?
     private var queue: [ModelFiles.File] = []
     private var current: ModelFiles.File?
+    private var task: URLSessionDownloadTask?
+    /// Whether `task` carries on from a partial download.
+    private var resuming = false
+    /// Failed tries at the current file.
+    private var failures = 0
     private var completedBytes: Int64 = 0
     private let lock = NSLock()
     private var cancelled = false
 
-    public init(onChange: @escaping @Sendable (State) -> Void) {
+    public init(partials: PartialDownloads = PartialDownloads(), onChange: @escaping @Sendable (State) -> Void) {
+        self.partials = partials
         self.onChange = onChange
     }
 
@@ -108,14 +154,30 @@ public final class ModelDownloader: NSObject, URLSessionDownloadDelegate, @unche
         next()
     }
 
-    public func cancel() {
-        lock.withLock {
+    /// Stops the download, keeping what it got for the next start.
+    public func stop() async {
+        let (task, file) = lock.withLock {
             cancelled = true
+            queue = []
+            return (self.task, current)
+        }
+        if let task, let file {
+            let data = await withCheckedContinuation { continuation in
+                task.cancel(byProducingResumeData: { continuation.resume(returning: $0) })
+            }
+            partials.save(data, for: file)
+        }
+        lock.withLock {
             session?.invalidateAndCancel()
             session = nil
-            queue = []
+            self.task = nil
         }
         onChange(.idle)
+    }
+
+    /// ``stop()``, without waiting for it.
+    public func cancel() {
+        Task { await stop() }
     }
 
     private func next() {
@@ -123,6 +185,7 @@ public final class ModelDownloader: NSObject, URLSessionDownloadDelegate, @unche
         let step: Step = lock.withLock {
             guard !cancelled else { return .cancelled }
             current = queue.isEmpty ? nil : queue.removeFirst()
+            failures = 0
             guard let current else {
                 session?.finishTasksAndInvalidate()   // a session keeps its delegate alive until invalidated
                 session = nil
@@ -130,28 +193,56 @@ public final class ModelDownloader: NSObject, URLSessionDownloadDelegate, @unche
             }
             return .download(current)
         }
-        let file: ModelFiles.File
         switch step {
         case .cancelled: return
-        case .finished: onChange(.finished); return
-        case .download(let next): file = next
+        case .finished: onChange(.finished)
+        case .download(let file): begin(file)
         }
-        lock.withLock { _ = session?.downloadTask(with: file.url).resume() }
+    }
+
+    /// Starts (or carries on with) one file.
+    private func begin(_ file: ModelFiles.File, fresh: Bool = false) {
+        if fresh { partials.discard(file) }
+        let partial = partials.load(file)
+        lock.withLock {
+            guard let session, !cancelled else { return }
+            let task = partial.map { session.downloadTask(withResumeData: $0) } ?? session.downloadTask(with: file.url)
+            self.task = task
+            resuming = partial != nil
+            task.resume()
+        }
     }
 
     public func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
                            totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
-        let done = lock.withLock { completedBytes } + totalBytesWritten
-        onChange(.downloading(received: done, total: ModelFiles.totalBytes))
+        let (done, file) = lock.withLock { (completedBytes, current) }
+        // A resumed download counts from where it carried on: what it expects is the part that's left.
+        var before: Int64 = 0
+        if let file, totalBytesExpectedToWrite > 0, totalBytesExpectedToWrite < file.bytes {
+            before = file.bytes - totalBytesExpectedToWrite
+        }
+        onChange(.downloading(received: done + before + totalBytesWritten, total: ModelFiles.totalBytes))
     }
 
     public func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
-        guard let file = lock.withLock({ current }) else { return }
+        let (file, wasResuming) = lock.withLock { (current, resuming) }
+        guard let file else { return }
+        // A server error arrives as a finished download of the error page.
+        let status = (downloadTask.response as? HTTPURLResponse)?.statusCode ?? 200
+        guard (200..<300).contains(status) else {
+            if wasResuming {
+                begin(file, fresh: true)   // the partial download's link expired: start this file over
+            } else {
+                fail("Hugging Face answered \(status)")
+            }
+            return
+        }
         onChange(.verifying)
         do {
             let digest = try Self.sha256(of: location)
             // Hashing 500 MB takes a few seconds; the download may have been cancelled meanwhile.
             guard !lock.withLock({ cancelled }) else { return }
+            partials.discard(file)
             guard digest == file.sha256 else { throw EmbeddingError("\(file.name) didn't match its checksum") }
             let destination = ModelFiles.labelItFolder.appendingPathComponent(file.name)
             try? FileManager.default.removeItem(at: destination)
@@ -159,13 +250,45 @@ public final class ModelDownloader: NSObject, URLSessionDownloadDelegate, @unche
             lock.withLock { completedBytes += file.bytes }
             next()
         } catch {
-            onChange(.failed("\(error)"))
+            fail("\(error)")
         }
     }
 
     public func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        guard let error, (error as NSError).code != NSURLErrorCancelled else { return }
-        onChange(.failed(error.localizedDescription))
+        guard let error else { return }
+        let nsError = error as NSError
+        #if canImport(Darwin)
+        let partial = nsError.userInfo[NSURLSessionDownloadTaskResumeData] as? Data
+        #else
+        let partial: Data? = nil   // swift-corelibs-foundation can't resume downloads
+        #endif
+        let (file, isCurrent, wasResuming, failures): (ModelFiles.File?, Bool, Bool, Int) = lock.withLock {
+            let isCurrent = task === self.task && !cancelled
+            if isCurrent { self.failures += 1 }
+            return (current, isCurrent, resuming, self.failures)
+        }
+        guard let file else { return }
+        partials.save(partial, for: file)
+        // Cancelled on purpose: stop() keeps the partial download.
+        guard isCurrent, nsError.code != NSURLErrorCancelled else { return }
+        // A partial download that didn't carry on and left nothing new to resume from is no use any more.
+        let fresh = wasResuming && partial == nil
+        guard failures <= Self.retryDelays.count else {
+            fail(error.localizedDescription)
+            return
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + Self.retryDelays[failures - 1]) { [weak self] in
+            guard let self, !self.lock.withLock({ self.cancelled }) else { return }
+            self.begin(file, fresh: fresh)
+        }
+    }
+
+    private func fail(_ message: String) {
+        lock.withLock {
+            session?.finishTasksAndInvalidate()
+            session = nil
+        }
+        onChange(.failed(message))
     }
 
     static func sha256(of url: URL) throws -> String { try Hashing.sha256Hex(of: url) }

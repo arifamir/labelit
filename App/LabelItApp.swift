@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 @main
 struct LabelItApp: App {
@@ -63,6 +64,11 @@ extension Notification.Name {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = AppModel()
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Set before launch finishes, so a click on a notification that launched LabelIt still arrives.
+        UNUserNotificationCenter.current().delegate = self
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // One LabelIt at a time: two would rename the same files. A second copy (another build, or one started from a
         // different folder) shows the running one and quits.
@@ -103,5 +109,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
+    }
+}
+
+extension AppDelegate: UNUserNotificationCenterDelegate {
+    /// The photo model reminder: its Download button downloads the model, and a click on it opens LabelIt's window
+    /// (which has a Download button too).
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        guard response.notification.request.content.categoryIdentifier == AppModel.modelOfferCategory else { return }
+        let action = response.actionIdentifier
+        await MainActor.run {
+            if action == AppModel.downloadAction {
+                model.downloadModel()
+            } else if action == UNNotificationDefaultActionIdentifier {
+                model.showRequests += 1
+            }
+        }
+    }
+
+    /// Shows notifications while LabelIt's own windows are in front, too.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async
+        -> UNNotificationPresentationOptions {
+        [.banner, .list]
     }
 }

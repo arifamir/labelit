@@ -1,8 +1,8 @@
 import Foundation
 import LabelItCore
 
-/// Describes photos with EmbeddingGemma 2: the photo's vector is compared with every phrase in `Vocabulary`,
-/// and the best match in each group becomes a word when it stands out from the rest of its group.
+/// Describes photos with EmbeddingGemma 2: the photo's vector is compared with every phrase in `Vocabulary`, and each
+/// group's best matches go to `PhotoWords`, which picks the words with what the image reader saw.
 ///
 /// The model (about 1 GB) loads on first use and unloads after `idleUnload` without photos.
 public actor GemmaPhotoDescriber: PhotoDescriber {
@@ -14,15 +14,18 @@ public actor GemmaPhotoDescriber: PhotoDescriber {
     }
 
     public struct Description: Sendable {
-        public var chosen: [String]
         public var ranked: [Vocabulary.Group: [Match]]
         public var seconds: Double
-    }
 
-    /// A best match counts only this far above its group's average (in standard deviations).
-    /// Tuned on real phone photos with `labelit-cli describe`.
-    /// Measured on 28 phone photos (2026-11-09): true subjects scored z 3.4–5.6, wrong guesses up to 3.1.
-    public static let thresholds: [Vocabulary.Group: Float] = [.subject: 3.3, .setting: 3.0, .light: 3.0]
+        /// Each group's best few, for `PhotoWords.choose`.
+        public var matches: [PhotoMatch] {
+            ranked.flatMap { group, matches in
+                matches.prefix(5).map {
+                    PhotoMatch(slug: $0.concept.slug, group: group, zScore: Double($0.zScore), needs: $0.concept.needs)
+                }
+            }
+        }
+    }
 
     private let files: ModelFiles.Located
     private let idleUnload: Duration
@@ -41,9 +44,9 @@ public actor GemmaPhotoDescriber: PhotoDescriber {
 
     public var isLoaded: Bool { embedder != nil }
 
-    public func describe(_ picture: any Pixels) async -> [String] {
+    public func describe(_ picture: any Pixels) async -> [PhotoMatch] {
         do {
-            return try analyze(picture).chosen
+            return try analyze(picture).matches
         } catch {
             FileHandle.standardError.write(Data("LabelIt: EmbeddingGemma couldn't describe a photo: \(error)\n".utf8))
             return []
@@ -57,7 +60,6 @@ public actor GemmaPhotoDescriber: PhotoDescriber {
         let vector = try embedder.embed(image: image)
 
         var ranked: [Vocabulary.Group: [Match]] = [:]
-        var chosen: [String] = []
         // Every phrase's score, to judge each group's best match against all of them: a group of 8
         // (sunset, night…) is too small for its own statistics.
         var scoresByGroup: [Vocabulary.Group: [Float]] = [:]
@@ -74,19 +76,8 @@ public actor GemmaPhotoDescriber: PhotoDescriber {
                 .map { Match(concept: $0, score: $1, zScore: ($1 - mean) / deviation) }
                 .sorted { $0.score > $1.score }
             ranked[group] = matches
-            if let best = matches.first, best.zScore >= Self.thresholds[group, default: 3] {
-                if !Self.isRedundant(best.concept.slug, after: chosen) { chosen.append(best.concept.slug) }
-            }
         }
-        return Description(chosen: chosen, ranked: ranked, seconds: Date().timeIntervalSince(started))
-    }
-
-    /// "garden" after "garden", "snowy" after "snow": the same thing said twice.
-    static func isRedundant(_ slug: String, after chosen: [String]) -> Bool {
-        let earlier = chosen.flatMap { $0.split(separator: "-").map(String.init) }
-        return slug.split(separator: "-").allSatisfy { word in
-            earlier.contains { $0.hasPrefix(word) || word.hasPrefix($0) }
-        }
+        return Description(ranked: ranked, seconds: Date().timeIntervalSince(started))
     }
 
     /// Frees the model for good: the app is quitting. Later photos go undescribed.

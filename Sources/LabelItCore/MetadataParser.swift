@@ -311,6 +311,7 @@ public enum MetadataParser {
                         }
                     case 0xA002: result.metadata.pixelWidth = reader.integer(exif).map(Int.init) ?? result.metadata.pixelWidth
                     case 0xA003: result.metadata.pixelHeight = reader.integer(exif).map(Int.init) ?? result.metadata.pixelHeight
+                    case 0xA434: result.metadata.lensModel = reader.string(exif)?.trimmingCharacters(in: .whitespaces)
                     default: break
                     }
                 }

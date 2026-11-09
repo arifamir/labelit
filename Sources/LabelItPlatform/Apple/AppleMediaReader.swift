@@ -58,6 +58,7 @@ public struct AppleMediaReader: MediaReader {
         metadata.model = (tiff[kCGImagePropertyTIFFModel] as? String)?.trimmingCharacters(in: .whitespaces)
 
         let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
+        metadata.lensModel = (exif[kCGImagePropertyExifLensModel] as? String)?.trimmingCharacters(in: .whitespaces)
         if let original = exif[kCGImagePropertyExifDateTimeOriginal] as? String {
             let offset = exif[kCGImagePropertyExifOffsetTimeOriginal] as? String
             metadata.captureDate = MetadataParser.parseExifDate(original, offset: offset)

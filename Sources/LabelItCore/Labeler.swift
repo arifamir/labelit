@@ -276,11 +276,12 @@ public actor Labeler {
         let image = await reader.picture(of: url, maxPixelSize: isVideo ? 1280 : isScreen ? 3000 : 1600)
         var analysis = if let image { await understanding.analyze(image, readText: true) } else { ImageAnalysis() }
         analysis.lines = KnownWords.correct(analysis.lines)
-        // Camera photos and videos: ask the describer what the picture shows. Not for screens or
-        // pictures that are mostly text (documents, receipts), which are named from their text.
-        if !isScreen, settings.describePhotos, let describer, let image,
-           analysis.fullText.split(whereSeparator: \.isWhitespace).count < 25 {
-            analysis.descriptions = await describer.describe(image)
+        // Camera photos and videos: ask the describer what the picture shows, even when it's full of text: that tells
+        // a photographed letter (named from its text) from a TV's label (a photo of a thing). Not for screens.
+        if !isScreen, settings.describePhotos, let describer, let image {
+            let matches = await describer.describe(image)
+            analysis.descriptions = PhotoWords.choose(matches, analysis: analysis, metadata: metadata)
+            analysis.alternatives = PhotoWords.alternatives(matches, chosen: analysis.descriptions, analysis: analysis)
         }
         var place: String?
         if settings.placeNames, [.phone, .finder].contains(source), let lat = metadata.latitude, let lon = metadata.longitude {

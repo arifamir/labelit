@@ -66,7 +66,16 @@ public struct AppleIntelligenceNamer: Namer {
         }
 
         let cleaned = NamingPrompt.dropFiller(Slug.make(slug ?? "", maxWords: 6, maxLength: 50))
-        guard cleaned.count >= 3, NamingPrompt.isSpecificEnough(cleaned, for: facts) else { return await fallback.name(facts) }
+        if ProcessInfo.processInfo.environment["LABELIT_DEBUG"] != nil {
+            FileHandle.standardError.write(Data("prompt:\n\(prompt)\nanswer: \(slug ?? "(none)")\n".utf8))
+        }
+        guard cleaned.count >= 3 else { return await fallback.name(facts) }
+        guard NamingPrompt.isSpecificEnough(cleaned, for: facts) else {
+            if [.photo, .video].contains(kind), let branded = NamingPrompt.brandedSubject(from: cleaned, for: facts) {
+                return NamingResult(slug: branded, kind: kind, namer: .appleIntelligence)
+            }
+            return await fallback.name(facts)
+        }
         return NamingResult(slug: cleaned, kind: kind, namer: .appleIntelligence)
     }
 }

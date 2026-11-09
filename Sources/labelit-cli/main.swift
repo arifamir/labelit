@@ -13,6 +13,7 @@ labelit-cli — on-device names for screenshots and phone photos (\(NativePlatfo
   labelit-cli name <file> [--app A] [--title T] [--url U]   what LabelIt would call it (with that capture context)
   labelit-cli inspect <file>                        what the metadata reader and text reader see
   labelit-cli describe <file>…                      EmbeddingGemma 2's top matches and scores, for tuning
+  labelit-cli download                              download EmbeddingGemma 2 (865 MB) for photo names; Ctrl-C pauses
   labelit-cli status                                what's available on this computer
 """
 
@@ -47,9 +48,40 @@ switch command {
 case "status":
     printStatus()
 
+case "download":
+    if let files = ModelFiles.locate() { say("EmbeddingGemma 2 is already here: \(files.folder.path)"); await finish() }
+    say("Downloading EmbeddingGemma 2 into \(ModelFiles.labelItFolder.path)")
+    let (outcome, continuation) = AsyncStream.makeStream(of: ModelDownloader.State.self)
+    let downloader = ModelDownloader { state in
+        continuation.yield(state)
+        if [.finished, .idle].contains(state) { continuation.finish() }
+        if case .failed = state { continuation.finish() }
+    }
+    // Ctrl-C keeps what's downloaded: the next run carries on from there.
+    signal(SIGINT, SIG_IGN)
+    let interrupt = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
+    interrupt.setEventHandler { Task { await downloader.stop() } }
+    interrupt.resume()
+    downloader.start()
+    var shown = -1
+    for await state in outcome {
+        switch state {
+        case .downloading(let received, let total):
+            let percent = Int(Double(received) / Double(max(total, 1)) * 100)
+            if percent != shown { shown = percent; FileHandle.standardOutput.write(Data("\r\(percent)%  ".utf8)) }
+        case .verifying: FileHandle.standardOutput.write(Data("\rchecking…".utf8))
+        case .finished: say("\rdone: photos are now described by EmbeddingGemma 2"); exit(0)
+        case .failed(let message): say("\nfailed: \(message). Run it again to carry on."); exit(1)
+        case .idle: say("\npaused. Run it again to carry on."); exit(1)
+        }
+    }
+
 case "name":
     guard let file = args.first.map(path) else { say(usage); exit(1) }
-    guard FileManager.default.fileExists(atPath: file.path) else { say("No such file: \(file.path)"); await finish(1) }
+    var isFolder: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: file.path, isDirectory: &isFolder), !isFolder.boolValue else {
+        say("No such file: \(file.path)"); await finish(1)
+    }
     func option(_ name: String) -> String? { args.firstIndex(of: name).flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil } }
     let context = CaptureContext(appName: option("--app"), windowTitle: option("--title"), url: option("--url"))
     let labeler = Labeler.native(describer: describer, log: RenameLog(fileURL: FileManager.default.temporaryDirectory
@@ -84,10 +116,14 @@ case "describe":
         guard let picture = await reader.picture(of: url, maxPixelSize: 1600) else { say("\(url.lastPathComponent): can't read"); continue }
         do {
             let result = try await describer.analyze(picture)
-            say("\n\(url.lastPathComponent)  →  \(result.chosen.joined(separator: "-"))  (\(String(format: "%.2f", result.seconds))s)")
+            let analysis = await NativePlatform.understanding().analyze(picture, readText: false)
+            let chosen = PhotoWords.choose(result.matches, analysis: analysis, metadata: await reader.metadata(of: url))
+            say("\n\(url.lastPathComponent)  →  \(chosen.joined(separator: "-"))  (\(String(format: "%.2f", result.seconds))s)")
             for group in Vocabulary.Group.allCases {
-                let top = (result.ranked[group] ?? []).prefix(4)
-                    .map { "\($0.concept.slug) \(String(format: "%.3f z%.1f", $0.score, $0.zScore))" }
+                let top = (result.ranked[group] ?? []).prefix(4).map { match in
+                    let backed = PhotoWords.isBacked(match.concept.needs, by: analysis).map { $0 ? "✓" : "✗" } ?? ""
+                    return "\(match.concept.slug)\(backed) \(String(format: "%.3f z%.1f", match.score, match.zScore))"
+                }
                 say("  \(group.rawValue.padding(toLength: 8, withPad: " ", startingAt: 0)) \(top.joined(separator: " | "))")
             }
         } catch {

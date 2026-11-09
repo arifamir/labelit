@@ -313,6 +313,7 @@ enum Fixtures {
             var problems: [String] = []
             if expected.make != actual.make { problems.append("make \(expected.make ?? "-") / \(actual.make ?? "-")") }
             if expected.model != actual.model { problems.append("model \(expected.model ?? "-") / \(actual.model ?? "-")") }
+            if expected.lensModel != actual.lensModel { problems.append("lens \(expected.lensModel ?? "-") / \(actual.lensModel ?? "-")") }
             if expected.isScreenshot != actual.isScreenshot { problems.append("screenshot \(expected.isScreenshot) / \(actual.isScreenshot)") }
             switch (expected.captureDate, actual.captureDate) {
             case let (a?, b?) where abs(a.timeIntervalSince(b)) > 1: problems.append("date \(a) / \(b)")

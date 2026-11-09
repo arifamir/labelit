@@ -1,4 +1,5 @@
 import AppKit
+import Network
 import Observation
 import ServiceManagement
 import UserNotifications
@@ -20,6 +21,11 @@ final class AppModel {
     var paused: Bool { didSet { save(paused, "paused"); restartWatching() } }
     var hasOnboarded: Bool { didSet { save(hasOnboarded, "hasOnboarded") } }
     var describePhotos: Bool { didSet { save(describePhotos, "describePhotos"); settingsChanged() } }
+    var checkForUpdates: Bool { didSet { save(checkForUpdates, "checkForUpdates") } }
+    /// A model download was started and hasn't finished or been cancelled: LabelIt carries on with it at launch.
+    private var modelWanted: Bool { didSet { save(modelWanted, "modelWanted") } }
+    /// Someone who skipped the model has been reminded once (or started a download), and isn't reminded again.
+    private var modelReminded: Bool { didSet { save(modelReminded, "modelReminded") } }
     /// Where phone files are looked for. Downloads, Desktop and Pictures until changed in Settings.
     private(set) var phoneFolders: [URL] {
         didSet {
@@ -39,6 +45,12 @@ final class AppModel {
     }
 
     private(set) var modelStatus: ModelStatus = .missing
+    /// The menu's "Better names for photos" row: shown with the one reminder, until it's answered.
+    var modelOfferInMenu = false
+    /// A phone hotspot (expensive) or Low Data Mode (constrained): setup doesn't tick the model download there.
+    private(set) var network = (expensive: false, constrained: false)
+    private let pathMonitor = NWPathMonitor()
+    static let modelSize = ByteCountFormatter.string(fromByteCount: ModelFiles.totalBytes, countStyle: .file)
     private var describer: GemmaPhotoDescriber?
     private var downloader: ModelDownloader?
     /// Tells this download's events from those of one that was cancelled.
@@ -49,7 +61,7 @@ final class AppModel {
         case .ready(let files):
             files.isDigUps ? "Using the copy DigUp downloaded" : "Downloaded"
         case .missing:
-            "Not downloaded (\(ByteCountFormatter.string(fromByteCount: ModelFiles.totalBytes, countStyle: .file)))"
+            "Not downloaded (\(Self.modelSize))"
         case .downloading(let fraction):
             "Downloading… \(Int(fraction * 100))%"
         case .verifying:
@@ -57,6 +69,23 @@ final class AppModel {
         case .failed(let message):
             "Download failed: \(message)"
         }
+    }
+
+    var modelIsReady: Bool {
+        if case .ready = modelStatus { return true }
+        return false
+    }
+
+    var modelIsDownloading: Bool {
+        switch modelStatus {
+        case .downloading, .verifying: true
+        default: false
+        }
+    }
+
+    /// Whether setup offers the model download ticked.
+    var modelPreselected: Bool {
+        ModelOffer.preselected(networkIsExpensive: network.expensive, networkIsConstrained: network.constrained)
     }
 
     var photosDescribedByModel: Bool {
@@ -134,6 +163,7 @@ final class AppModel {
     }
 
     let log = RenameLog(fileURL: RenameLog.defaultURL)
+    let updater = Updater()
     let labeler: Labeler
     private var watcher: FolderWatcher?
     private var hotKey: HotKey?
@@ -143,7 +173,7 @@ final class AppModel {
         defaults.register(defaults: [
             "watchScreenshots": true, "watchPhone": true, "placeNames": false, "finderTags": true,
             "browserURL": true, "captureHotKey": true, "notifications": true, "paused": false, "hasOnboarded": false,
-            "describePhotos": true,
+            "describePhotos": true, "modelWanted": false, "modelReminded": false, "checkForUpdates": true,
         ])
         watchScreenshots = defaults.bool(forKey: "watchScreenshots")
         watchPhone = defaults.bool(forKey: "watchPhone")
@@ -155,6 +185,9 @@ final class AppModel {
         paused = defaults.bool(forKey: "paused")
         hasOnboarded = defaults.bool(forKey: "hasOnboarded")
         describePhotos = defaults.bool(forKey: "describePhotos")
+        checkForUpdates = defaults.bool(forKey: "checkForUpdates")
+        modelWanted = defaults.bool(forKey: "modelWanted")
+        modelReminded = defaults.bool(forKey: "modelReminded")
         phoneFolders = (defaults.stringArray(forKey: "phoneFolders")?.map { URL(fileURLWithPath: $0, isDirectory: true) })
             ?? WatchFolders.defaults()
         labeler = Labeler.native(log: log)
@@ -163,7 +196,20 @@ final class AppModel {
     func start() {
         // On by default, so ask once at launch (macOS shows the prompt only the first time).
         if notifications { requestNotifications() }
+        UNUserNotificationCenter.current().setNotificationCategories([
+            UNNotificationCategory(identifier: Self.modelOfferCategory,
+                                   actions: [UNNotificationAction(identifier: Self.downloadAction, title: "Download (\(Self.modelSize))")],
+                                   intentIdentifiers: []),
+        ])
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            let network = (expensive: path.isExpensive, constrained: path.isConstrained)
+            Task { @MainActor in self?.network = network }
+        }
+        pathMonitor.start(queue: .global(qos: .utility))
         refreshModel()
+        // A download that was under way when LabelIt quit (or the Mac restarted) carries on where it stopped.
+        if modelWanted, !modelIsReady { downloadModel() }
+        updater.startChecking { [weak self] in self?.checkForUpdates ?? false }
         settingsChanged()
         updateHotKey()
         Task { await refresh() }
@@ -264,6 +310,11 @@ final class AppModel {
         }
     }
 
+    func installUpdate() {
+        guard let release = updater.available else { return }
+        Task { await updater.install(release) }
+    }
+
     func requestScreenRecording() {
         if !CGRequestScreenCaptureAccess() {
             NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
@@ -294,6 +345,10 @@ final class AppModel {
     }
 
     func downloadModel() {
+        guard !modelIsDownloading else { return }
+        modelWanted = true
+        modelReminded = true
+        modelOfferInMenu = false
         modelStatus = .downloading(fraction: 0)
         downloadRun += 1
         let run = downloadRun
@@ -308,6 +363,7 @@ final class AppModel {
     }
 
     func cancelDownload() {
+        modelWanted = false
         downloadRun += 1
         downloader?.cancel()
         downloader = nil
@@ -322,6 +378,7 @@ final class AppModel {
         case .verifying: modelStatus = .verifying
         case .finished:
             downloader = nil
+            modelWanted = false
             refreshModel()
         case .failed(let message):
             downloader = nil
@@ -331,6 +388,7 @@ final class AppModel {
 
     /// llama.cpp aborts if the process exits with the model loaded, so quitting frees it first.
     func prepareToQuit() async {
+        await downloader?.stop()   // keeps the partial download for the next launch
         await describer?.shutDown()
     }
 
@@ -359,6 +417,7 @@ final class AppModel {
                 guard let entry else { return }
                 await self?.refresh()
                 await self?.notify(entry)
+                await self?.remindAboutModel(after: entry)
             }
         }
         watcher.start()
@@ -371,6 +430,25 @@ final class AppModel {
 
     private func requestNotifications() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { _, _ in }
+    }
+
+    nonisolated static let modelOfferCategory = "model-offer"
+    nonisolated static let downloadAction = "download"
+
+    /// The one reminder, for someone who skipped the model: when a phone photo is named without it.
+    private func remindAboutModel(after entry: RenameEntry) {
+        guard ModelOffer.shouldRemind(after: entry.source, modelAvailable: modelIsReady, downloading: modelIsDownloading,
+                                      describePhotos: describePhotos, onboarded: hasOnboarded,
+                                      alreadyReminded: modelReminded) else { return }
+        modelReminded = true
+        modelOfferInMenu = true
+        guard notifications else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Better names for photos"
+        content.body = "LabelIt can describe what's in your photos with an AI model that runs on this Mac. "
+            + "Download it once (\(Self.modelSize))."
+        content.categoryIdentifier = Self.modelOfferCategory
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "model-offer", content: content, trigger: nil))
     }
 
     private func notify(_ entry: RenameEntry) {

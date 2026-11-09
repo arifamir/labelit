@@ -14,7 +14,7 @@ public struct VisionUnderstanding: ImageUnderstanding {
         async let animals = recognizeAnimals(image)
         async let faces = countFaces(image)
         async let lines = readText ? recognizeText(image) : []
-        return await ImageAnalysis(labels: labels, animals: animals, faceCount: faces, lines: lines)
+        return await ImageAnalysis(labels: labels, animals: animals, faceCount: faces, lines: lines, detectsObjects: true)
     }
 
     private func classify(_ image: CGImage) async -> [VisualLabel] {

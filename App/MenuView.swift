@@ -15,6 +15,14 @@ struct MenuView: View {
             header
             Divider()
             recentList
+            if let update = UpdateRow(updater: model.updater, install: model.installUpdate) {
+                Divider()
+                update
+            }
+            if model.modelOfferInMenu, !model.modelIsReady, !model.modelIsDownloading {
+                Divider()
+                modelOffer
+            }
             if let message = model.lastMessage {
                 Divider()
                 Label(message, systemImage: "exclamationmark.triangle")
@@ -27,6 +35,24 @@ struct MenuView: View {
         }
         .frame(width: 380)
         .task { await model.refresh() }
+    }
+
+    /// The one reminder about the photo model, for someone who skipped it at setup.
+    private var modelOffer: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Better names for photos", systemImage: "sparkles").font(.callout.weight(.semibold))
+            Text("An AI model on this Mac can describe what's in your photos: dog-beach-sunset instead of dog. One-time download, \(AppModel.modelSize).")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button("Download") { model.downloadModel() }
+                    .buttonStyle(.borderedProminent)
+                Button("Not now") { model.modelOfferInMenu = false }
+            }
+            .controlSize(.small)
+        }
+        .padding(12)
     }
 
     private var header: some View {
@@ -176,5 +202,51 @@ private struct RecentRow: View {
         case .video: return "video"
         case .other: return "doc"
         }
+    }
+}
+
+/// A newer LabelIt, an update under way, or one that failed. Nothing when there's no news.
+struct UpdateRow: View {
+    let updater: Updater
+    let install: () -> Void
+
+    init?(updater: Updater, install: @escaping () -> Void) {
+        switch updater.state {
+        case .available, .updating, .failed: break
+        default: return nil
+        }
+        self.updater = updater
+        self.install = install
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            switch updater.state {
+            case .available(let release):
+                Label("LabelIt \(release.version) is available", systemImage: "arrow.down.circle")
+                    .font(.callout.weight(.semibold))
+                HStack {
+                    Button("Update") { install() }
+                        .buttonStyle(.borderedProminent)
+                    Button("What's New") { NSWorkspace.shared.open(release.notes) }
+                }
+                .controlSize(.small)
+            case .updating(let step):
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(step).font(.callout)
+                }
+            case .failed(let message):
+                Label(message, systemImage: "exclamationmark.triangle")
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Dismiss") { updater.dismissFailure() }.controlSize(.small)
+            default:
+                EmptyView()
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

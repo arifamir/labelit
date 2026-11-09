@@ -344,3 +344,109 @@ final class TempDir {
         #expect(KnownWords.correct([TextLine(text: "Label it", height: 0.02, top: 0.1)]).first?.text == "Label it")
     }
 }
+
+@Suite struct PhotoWordTests {
+    static let seeing = ImageAnalysis(detectsObjects: true)
+    static var oneFace: ImageAnalysis { var a = seeing; a.faceCount = 1; return a }
+    static var frontCamera: MediaMetadata { var m = MediaMetadata(); m.lensModel = "iPhone 13 Pro front camera 2.71mm f/2.2"; return m }
+
+    func match(_ slug: String, _ z: Double, _ group: PhotoMatch.Group = .subject, needs: Evidence? = nil) -> PhotoMatch {
+        PhotoMatch(slug: slug, group: group, zScore: z, needs: needs)
+    }
+
+    @Test func aFrontCameraPhotoWithAFaceIsASelfie() {
+        let matches = [match("portrait", 4.9, needs: .face), match("selfie", 2.9, needs: .face), match("office", 3.4, .setting)]
+        #expect(PhotoWords.choose(matches, analysis: Self.oneFace, metadata: Self.frontCamera) == ["selfie", "office"])
+        // The back camera: the describer's portrait stands.
+        #expect(PhotoWords.choose(matches, analysis: Self.oneFace, metadata: MediaMetadata()) == ["portrait", "office"])
+        // The front camera pointed at a thing, no face: not a selfie.
+        #expect(PhotoWords.choose([match("router", 5)], analysis: Self.seeing, metadata: Self.frontCamera) == ["router"])
+    }
+
+    @Test func aFaceConfirmsAPortraitBelowTheUsualScore() {
+        let matches = [match("portrait", 3.0, needs: .face), match("shopping", 2.5)]
+        #expect(PhotoWords.choose(matches, analysis: Self.oneFace, metadata: MediaMetadata()) == ["portrait"])
+        // No face: a portrait is ruled out, whatever its score.
+        #expect(PhotoWords.choose([match("portrait", 4.5, needs: .face)], analysis: Self.seeing, metadata: MediaMetadata()).isEmpty)
+    }
+
+    @Test func aFaceDoesNotConfirmWhatThePersonIsDoing() {
+        // A selfie against a wall scored "haircut" 3.1: a face makes it possible, not likely.
+        let haircut = [match("haircut", 3.1, needs: .someone)]
+        #expect(PhotoWords.choose(haircut, analysis: Self.oneFace, metadata: MediaMetadata()).isEmpty)
+        #expect(PhotoWords.choose([match("haircut", 3.6, needs: .someone)], analysis: Self.oneFace, metadata: MediaMetadata()) == ["haircut"])
+        #expect(PhotoWords.choose([match("haircut", 3.6, needs: .someone)], analysis: Self.seeing, metadata: MediaMetadata()).isEmpty)
+    }
+
+    @Test func weatherNeedsTheClassifierToSeeIt() {
+        let snowy = [match("snowy", 3.3, .light, needs: .seen(["snow"]))]
+        #expect(PhotoWords.choose(snowy, analysis: Self.seeing, metadata: MediaMetadata()).isEmpty)
+        var snow = Self.seeing
+        snow.labels = [VisualLabel(name: "snow", confidence: 0.8)]
+        #expect(PhotoWords.choose(snowy, analysis: snow, metadata: MediaMetadata()) == ["snowy"])
+    }
+
+    @Test func aReaderThatOnlyReadsTextLeavesMatchesToTheirScore() {
+        // Tesseract on Linux finds no faces: that must not rule out every person.
+        let textOnly = ImageAnalysis()
+        #expect(PhotoWords.choose([match("portrait", 3.5, needs: .face)], analysis: textOnly, metadata: MediaMetadata()) == ["portrait"])
+        #expect(PhotoWords.choose([match("portrait", 3.0, needs: .face)], analysis: textOnly, metadata: MediaMetadata()).isEmpty)
+    }
+
+    @Test func closeRunnersUpAreAlternatives() {
+        let matches = [match("device-label", 4.4), match("appliance", 4.4), match("washing-machine", 4.3), match("label", 3.5),
+                       match("baby", 4.2, needs: .someone)]
+        let chosen = PhotoWords.choose(matches, analysis: Self.seeing, metadata: MediaMetadata())
+        #expect(chosen == ["device-label"])
+        // Not "label" (too far behind) and not "baby" (nobody in the picture).
+        #expect(PhotoWords.alternatives(matches, chosen: chosen, analysis: Self.seeing) == ["appliance", "washing-machine"])
+    }
+
+    @Test func aTextHeavyPhotoOfAThingIsAPhoto() {
+        let text = (1...70).map { "word\($0)" }.joined(separator: " ")
+        func kind(_ described: [String]) -> FileKind {
+            KindDetector.detect(FileFacts(url: URL(fileURLWithPath: "/tmp/IMG_1.HEIC"), source: .phone,
+                                          analysis: ImageAnalysis(lines: [TextLine(text: text, height: 0.02, top: 0.5)],
+                                                                  descriptions: described)))
+        }
+        #expect(kind(["tv-ports"]) == .photo)     // a TV's back, covered in small print
+        #expect(kind(["letter"]) == .document)
+        #expect(kind([]) == .document)            // no describer: the text decides, as before
+    }
+
+    @Test func aPhotoNameMustSayWhatTheDescriberSaw() {
+        var analysis = ImageAnalysis(lines: [TextLine(text: "CANDY HOOVER GROUP Srl", height: 0.05, top: 0.2)],
+                                     descriptions: ["device-label"])
+        analysis.alternatives = ["washing-machine"]
+        let facts = FileFacts(url: URL(fileURLWithPath: "/tmp/IMG_1.HEIC"), source: .phone, analysis: analysis)
+        #expect(!NamingPrompt.isSpecificEnough("candy-hoover-group-c8te-s", for: facts))
+        #expect(NamingPrompt.isSpecificEnough("candy-washing-machine", for: facts))
+        #expect(NamingPrompt.isSpecificEnough("candy-device-label", for: facts))
+        // What can be saved from the miss: the brand printed on the photo, then the subject.
+        #expect(NamingPrompt.brandedSubject(from: "candy-hoover-group-c8te-s", for: facts) == "candy-device-label")
+        #expect(NamingPrompt.brandedSubject(from: "kitchen-appliance", for: facts) == nil)   // "kitchen" isn't on it
+    }
+
+    @Test func rulesCallAFrontCameraFaceASelfie() async {
+        var analysis = Self.oneFace
+        analysis.labels = [VisualLabel(name: "people", confidence: 0.9)]
+        let facts = FileFacts(url: URL(fileURLWithPath: "/tmp/IMG_1.HEIC"), source: .phone, metadata: Self.frontCamera,
+                              analysis: analysis)
+        #expect(await RuleNamer().name(facts).slug.hasPrefix("selfie"))
+        #expect(NamingPrompt.prompt(for: facts, kind: .photo).contains("front camera"))
+    }
+}
+
+@Suite struct AppVersionTests {
+    @Test func newerVersionsAreSpotted() {
+        #expect(AppVersion.isNewer("v0.1.3", than: "0.1.2"))
+        #expect(AppVersion.isNewer("0.1.10", than: "0.1.9"))     // numbers, not text
+        #expect(AppVersion.isNewer("0.2", than: "0.1.9"))
+        #expect(AppVersion.isNewer("1.0.0", than: "0.9.9"))
+        #expect(!AppVersion.isNewer("0.1.3", than: "0.1.3"))
+        #expect(!AppVersion.isNewer("0.1", than: "0.1.0"))       // the same version, written shorter
+        #expect(!AppVersion.isNewer("0.1.2", than: "0.1.3"))
+        #expect(!AppVersion.isNewer("v0.1.4-beta", than: "0.1.3"))   // not a version LabelIt releases
+        #expect(!AppVersion.isNewer("", than: "0.1.3"))
+    }
+}

@@ -41,8 +41,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.kodberry.labelit
         PRODUCT_NAME: LabelIt
-        MARKETING_VERSION: "0.1.2"
-        CURRENT_PROJECT_VERSION: "3"
+        MARKETING_VERSION: "0.1.3"
+        CURRENT_PROJECT_VERSION: "4"
         LIBRARY_SEARCH_PATHS: $(SRCROOT)/Vendor/llama/lib
         ENABLE_USER_SCRIPT_SANDBOXING: NO
         SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor

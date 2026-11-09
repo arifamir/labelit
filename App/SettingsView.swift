@@ -39,6 +39,22 @@ private struct SourcesPane: View {
                 Toggle("Launch at login", isOn: Binding(get: { model.launchAtLogin }, set: { model.launchAtLogin = $0 }))
             }
             Section {
+                Toggle(isOn: $model.checkForUpdates) {
+                    Text("Check for updates")
+                    Text("Once a day, asks GitHub for the newest version number. Nothing about you or your files is sent.")
+                }
+                HStack {
+                    Text(updateStatus).font(.callout).foregroundStyle(.secondary)
+                    Spacer()
+                    if model.updater.available != nil {
+                        Button("Update") { model.installUpdate() }
+                    } else {
+                        Button("Check Now") { Task { await model.updater.check() } }
+                            .disabled(model.updater.state == .checking || isUpdating)
+                    }
+                }
+            }
+            Section {
                 if model.watchScreenshots {
                     FolderRow(folder: ScreenCapturer.screenshotFolder, prefix: "Screenshots · ", onRemove: nil)
                 }
@@ -67,6 +83,25 @@ private struct SourcesPane: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+extension SourcesPane {
+    private var isUpdating: Bool {
+        if case .updating = model.updater.state { return true }
+        return false
+    }
+
+    private var updateStatus: String {
+        let current = "LabelIt \(model.updater.currentVersion)"
+        return switch model.updater.state {
+        case .idle: current
+        case .checking: "Checking…"
+        case .upToDate: "\(current) is the newest version."
+        case .available(let release): "LabelIt \(release.version) is available (you have \(model.updater.currentVersion))."
+        case .updating(let step): step
+        case .failed(let message): message
+        }
     }
 }
 

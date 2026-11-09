@@ -3,10 +3,15 @@ import SwiftUI
 struct WelcomeView: View {
     @Bindable var model: AppModel
     @State private var tick = 0
+    /// The model download box, once it's been clicked; until then it follows the network (off on a hotspot).
+    @State private var wantsModel: Bool?
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
 
+    private var downloadsModel: Bool { wantsModel ?? model.modelPreselected }
+
     private func onDone() {
+        if !model.hasOnboarded, downloadsModel, !model.modelIsReady { model.downloadModel() }
         model.hasOnboarded = true
         dismissWindow(id: WindowID.welcome)
     }
@@ -41,6 +46,7 @@ struct WelcomeView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                if !model.modelIsReady { modelRow }
                 if let hint = model.namerHint {
                     HStack(alignment: .firstTextBaseline) {
                         Image(systemName: "sparkles").foregroundStyle(.secondary)
@@ -83,6 +89,38 @@ struct WelcomeView: View {
         .fixedSize(horizontal: false, vertical: true)
         .background { Color.clear.id(tick) }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in tick += 1 }
+    }
+}
+
+extension WelcomeView {
+    /// EmbeddingGemma 2: ticked at setup (unless the network costs money), downloaded in the background after Start.
+    @ViewBuilder private var modelRow: some View {
+        let title = "Describe photos with an AI model"
+        let detail = "Names like dog-beach-sunset instead of dog. Runs on this Mac: a one-time \(AppModel.modelSize) download, in the background."
+        if model.modelIsDownloading {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                Text(model.modelSummary).font(.caption).foregroundStyle(.secondary)
+                if case .downloading(let fraction) = model.modelStatus { ProgressView(value: fraction) }
+            }
+        } else if model.hasOnboarded {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Download") { model.downloadModel() }
+            }
+        } else {
+            Toggle(isOn: Binding(get: { downloadsModel }, set: { wantsModel = $0 })) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                    Text(detail + (model.modelPreselected ? "" : " Off for now: this Mac is on a hotspot or in Low Data Mode."))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 }
 

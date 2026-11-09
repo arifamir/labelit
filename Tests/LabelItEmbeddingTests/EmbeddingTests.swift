@@ -5,10 +5,10 @@ import Testing
 
 @Suite struct DescriberLogicTests {
     @Test func redundantWords() {
-        #expect(GemmaPhotoDescriber.isRedundant("snowy", after: ["snow"]))
-        #expect(GemmaPhotoDescriber.isRedundant("garden", after: ["garden"]))
-        #expect(!GemmaPhotoDescriber.isRedundant("beach", after: ["dog"]))
-        #expect(!GemmaPhotoDescriber.isRedundant("car-wheel", after: ["car-interior"]))
+        #expect(PhotoWords.isRedundant("snowy", after: ["snow"]))
+        #expect(PhotoWords.isRedundant("garden", after: ["garden"]))
+        #expect(!PhotoWords.isRedundant("beach", after: ["dog"]))
+        #expect(!PhotoWords.isRedundant("car-wheel", after: ["car-interior"]))
     }
 
     @Test func imageSizeFillsTheBudgetInMultiplesOf48() throws {
@@ -68,5 +68,52 @@ import Testing
             }
         }
         return RGBPicture(width: size, height: size, pixels: pixels)
+    }
+}
+
+@Suite struct ModelOfferTests {
+    @Test func tickedUnlessTheNetworkCostsMoney() {
+        #expect(ModelOffer.preselected(networkIsExpensive: false, networkIsConstrained: false))
+        #expect(!ModelOffer.preselected(networkIsExpensive: true, networkIsConstrained: false))   // phone hotspot
+        #expect(!ModelOffer.preselected(networkIsExpensive: false, networkIsConstrained: true))   // Low Data Mode
+    }
+
+    @Test func remindsOnceAfterAPhonePhotoNamedWithoutTheModel() {
+        func remind(_ source: Source = .phone, available: Bool = false, downloading: Bool = false, describe: Bool = true,
+                    onboarded: Bool = true, reminded: Bool = false) -> Bool {
+            ModelOffer.shouldRemind(after: source, modelAvailable: available, downloading: downloading,
+                                    describePhotos: describe, onboarded: onboarded, alreadyReminded: reminded)
+        }
+        #expect(remind())
+        #expect(!remind(reminded: true))        // only once
+        #expect(!remind(.screenshot))           // screenshots don't need the model
+        #expect(!remind(.capture))
+        #expect(!remind(available: true))
+        #expect(!remind(downloading: true))
+        #expect(!remind(describe: false))       // turned photo descriptions off
+        #expect(!remind(onboarded: false))      // still in setup, which offers it
+    }
+}
+
+@Suite struct PartialDownloadTests {
+    @Test func keepsAndDiscardsAPartialDownload() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("labelit-partials-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let partials = PartialDownloads(folder: folder)
+        let file = ModelFiles.media
+        #expect(partials.load(file) == nil)
+        partials.save(nil, for: file)            // a cancel with nothing to resume from
+        partials.save(Data(), for: file)
+        #expect(partials.load(file) == nil)
+        partials.save(Data("resume".utf8), for: file)
+        #if canImport(Darwin)
+        #expect(partials.load(file) == Data("resume".utf8))
+        #expect(partials.load(ModelFiles.text) == nil)   // per file
+        #else
+        #expect(partials.load(file) == nil)              // can't resume on Linux
+        #endif
+        partials.discard(file)
+        #expect(partials.load(file) == nil)
+        #expect(!FileManager.default.fileExists(atPath: folder.appendingPathComponent(file.name + ".resume").path))
     }
 }

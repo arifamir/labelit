@@ -70,8 +70,15 @@ public struct MediaMetadata: Sendable, Equatable {
     public var pixelHeight: Int?
     /// A document's own title (PDF metadata), when it has one.
     public var title: String?
+    /// The camera's lens, from EXIF: "iPhone 13 Pro front camera 2.71mm f/2.2".
+    public var lensModel: String?
 
     public init() {}
+
+    /// Taken with a phone's front (selfie) camera.
+    public var isFrontCamera: Bool {
+        lensModel?.localizedCaseInsensitiveContains("front") ?? false
+    }
 
     public var isFromAppleMobileDevice: Bool {
         guard let model else { return false }
@@ -114,14 +121,20 @@ public struct ImageAnalysis: Sendable, Equatable {
     public var lines: [TextLine] = []
     /// What a photo shows, most important first ("dog", "beach", "sunset"), from a `PhotoDescriber`.
     public var descriptions: [String] = []
+    /// Subjects that scored nearly as well as the chosen one ("washing-machine" beside "device-label").
+    public var alternatives: [String] = []
+    /// Whether the reader looks for faces and objects (Apple Vision) rather than only reading text (Tesseract):
+    /// no face found means something only then.
+    public var detectsObjects = false
 
     public init(labels: [VisualLabel] = [], animals: [String] = [], faceCount: Int = 0, lines: [TextLine] = [],
-                descriptions: [String] = []) {
+                descriptions: [String] = [], detectsObjects: Bool = false) {
         self.labels = labels
         self.animals = animals
         self.faceCount = faceCount
         self.lines = lines
         self.descriptions = descriptions
+        self.detectsObjects = detectsObjects
     }
 
     public var fullText: String { lines.map(\.text).joined(separator: "\n") }

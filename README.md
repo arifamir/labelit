@@ -63,7 +63,7 @@ Everything happens on your Mac.
 | Text in screenshots | Apple **Vision**, on-device |
 | What a photo shows | **EmbeddingGemma 2** (Google DeepMind, open weights) via llama.cpp on your GPU |
 | Writing the name | **Apple Intelligence** (Foundation Models), on-device, or built-in rules |
-| Network | None, except two things you choose: the one-time model download and the optional city lookup (Apple's location service) |
+| Network | None, except the one-time model download, the optional city lookup (Apple's location service), and a daily check for a new version (one request to GitHub for the latest version number; off in Settings) |
 
 LabelIt never uploads a file, never touches your Photos library, and has no analytics.
 
@@ -131,8 +131,12 @@ curl -fsSL https://raw.githubusercontent.com/arifamir/labelit/main/install.sh | 
 ```
 
 It downloads the latest release, checks it against its SHA-256, puts LabelIt in Applications and opens it.
-[Read the script](install.sh) first if you like; it's short. Run the same line again to update, or add
-`-s -- --uninstall` after `bash` to remove LabelIt.
+[Read the script](install.sh) first if you like; it's short. Add `-s -- --uninstall` after `bash` to remove
+LabelIt.
+
+**Updates:** LabelIt checks GitHub once a day, and when there's a new version the menu shows an **Update**
+button. It downloads the release, checks its SHA-256 and signature like the installer does, and reopens. Your
+settings, history and model stay. (Versions before 0.1.3 can't check: run the install line once more to update.)
 
 **You'll need** a Mac with Apple Silicon running **macOS 26**.
 
@@ -144,9 +148,11 @@ LabelIt has no Dock icon: open it again (from Applications or Spotlight) at any 
 
 **Optional, for better names:**
 
-- **EmbeddingGemma 2**: go to *Settings → Naming → Download*. It's 865 MB, and the files are checked
-  against pinned SHA-256 hashes. If you already use [DigUp](https://github.com/ARahim3/DigUp), LabelIt
-  reuses its copy and skips the download.
+- **EmbeddingGemma 2** describes what's in phone photos. The welcome window offers it, ticked unless you're on
+  a phone hotspot or in Low Data Mode, and it downloads in the background (865 MB, once). Skipped it? The first
+  phone photo named without it brings one reminder, and *Settings → Photos → Download* gets it any time. An
+  interrupted download carries on where it stopped, and the files are checked against pinned SHA-256 hashes. If
+  you already use [DigUp](https://github.com/ARahim3/DigUp), LabelIt reuses its copy and skips the download.
 - **Apple Intelligence**: turn it on in *System Settings → Apple Intelligence & Siri*.
 
 ### Build from source
@@ -284,7 +290,8 @@ labelit-cli watch [folder…]        # rename new screenshots and phone files (d
 labelit-cli undo                   # put the last rename back
 ```
 
-EmbeddingGemma 2 is found in `~/.local/share/LabelIt/Models` or the Hugging Face cache
+`labelit-cli download` fetches EmbeddingGemma 2 into `~/.local/share/LabelIt/Models` (or `LABELIT_MODEL_DIR`).
+A copy in the Hugging Face cache is used too
 (`huggingface-cli download ggml-org/embeddinggemma-2-GGUF embeddinggemma-2-Q8_0.gguf mmproj-embeddinggemma-2-Q8_0.gguf`).
 
 ## Development
