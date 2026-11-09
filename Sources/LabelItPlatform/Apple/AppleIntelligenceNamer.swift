@@ -5,7 +5,8 @@ import LabelItCore
 
 @Generable
 struct GeneratedLabel {
-    @Guide(description: "A short descriptive file name: 2 to 5 lowercase English words joined by hyphens, e.g. stripe-checkout-payment-declined or dog-running-on-beach. Name the specific subject, product, site or app. No dates, no file extension.")
+    // No example names: the on-device model copies an example's words into its answer.
+    @Guide(description: "A short descriptive file name: 2 to 5 lowercase English words joined by hyphens, naming the specific subject, product, site, page or app. No dates, no file extension.")
     var slug: String
 }
 

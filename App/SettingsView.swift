@@ -125,8 +125,8 @@ private struct NamingPane: View {
                 }
             }
             Section("Examples") {
-                Text("stripe-checkout-payment-declined_2026-11-08_104107.png")
-                Text("receipt-blue-bottle-9-75_2026-11-02.heic")
+                Text("checkout-payment-declined_2026-11-08_104107.png")
+                Text("receipt-corner-cafe-9-75_2026-11-02.heic")
                 Text("living-room_2026-09-20.heic")
                 Text("garden-sunny_lisbon_2026-11-02.heic  + .mov")
             }

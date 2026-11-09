@@ -256,3 +256,44 @@ final class TempDir {
         #expect(NamingPrompt.isSpecificEnough("dog-beach", for: photo))
     }
 }
+
+@Suite struct ErrorDetectionTests {
+    /// A README that mentions "payment-declined" in a table is a page, not an error screenshot.
+    @Test func aLongPageThatMentionsAnErrorIsNotAnError() {
+        var lines = [TextLine(text: "LabelIt", height: 0.04, top: 0.15)]
+        for row in 0..<14 {
+            lines.append(TextLine(text: "Screenshots and phone photos, named for what's in them, line \(row) of the page",
+                                  height: 0.016, top: 0.25 + Double(row) * 0.04))
+        }
+        lines.append(TextLine(text: "stripe-checkout-payment-declined_2026-11-08_104107.png", height: 0.016, top: 0.45))
+        let facts = FileFacts(url: URL(fileURLWithPath: "/tmp/s.png"), source: .screenshot, analysis: ImageAnalysis(lines: lines))
+        #expect(KindDetector.detect(facts) == .ui)
+    }
+
+    @Test func aProminentErrorOnABusyScreenIsAnError() {
+        var lines = [TextLine(text: "Your payment was declined", height: 0.04, top: 0.2)]
+        for row in 0..<14 {
+            lines.append(TextLine(text: "Order summary and shipping details for this order, line \(row)",
+                                  height: 0.016, top: 0.3 + Double(row) * 0.04))
+        }
+        let facts = FileFacts(url: URL(fileURLWithPath: "/tmp/s.png"), source: .screenshot, analysis: ImageAnalysis(lines: lines))
+        #expect(KindDetector.detect(facts) == .error)
+    }
+}
+
+@Suite struct BrowserScreenshotTests {
+    static let github = CaptureContext(appName: "Google Chrome", bundleID: "com.google.Chrome",
+        windowTitle: "arifamir/labelit: Screenshots, AirDropped photos and PDFs, named for what's in them. On-device AI for macOS",
+        url: "https://github.com/arifamir/labelit/tree/main")
+
+    @Test func aModelNameThatIgnoresThePageIsRejected() {
+        let facts = FileFacts(url: URL(fileURLWithPath: "/tmp/s.png"), source: .screenshot, context: Self.github)
+        #expect(!NamingPrompt.isSpecificEnough("stripe-checkout-payment-declined", for: facts))
+        #expect(NamingPrompt.isSpecificEnough("github-labelit-readme", for: facts))
+    }
+
+    @Test func theRulesNameItAfterThePage() async {
+        let facts = FileFacts(url: URL(fileURLWithPath: "/tmp/s.png"), source: .screenshot, context: Self.github)
+        #expect(await RuleNamer().name(facts).slug == "github-arifamir-labelit")
+    }
+}

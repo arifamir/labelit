@@ -10,6 +10,7 @@ labelit-cli — on-device names for screenshots and phone photos (\(NativePlatfo
   labelit-cli rename <file>…                        rename these images or videos now (undo: labelit-cli undo)
   labelit-cli watch [folder…]                       rename new screenshots and phone files as they arrive
   labelit-cli undo                                  put the last rename back
+  labelit-cli name <file> [--app A] [--title T] [--url U]   what LabelIt would call it (with that capture context)
   labelit-cli inspect <file>                        what the metadata reader and text reader see
   labelit-cli describe <file>…                      EmbeddingGemma 2's top matches and scores, for tuning
   labelit-cli status                                what's available on this computer
@@ -45,6 +46,18 @@ func describe(_ proposal: Proposal) -> String {
 switch command {
 case "status":
     printStatus()
+
+case "name":
+    guard let file = args.first.map(path) else { say(usage); exit(1) }
+    func option(_ name: String) -> String? { args.firstIndex(of: name).flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil } }
+    let context = CaptureContext(appName: option("--app"), windowTitle: option("--title"), url: option("--url"))
+    let labeler = Labeler.native(describer: describer, log: RenameLog(fileURL: FileManager.default.temporaryDirectory
+        .appendingPathComponent("labelit-name-\(UUID()).json")))
+    let source: Source = reader.isSystemScreenshot(file) ? .screenshot : .finder
+    guard let proposal = await labeler.plan(file, source: source, context: context.isEmpty ? nil : context) else {
+        say("LabelIt doesn't name this kind of file."); await finish(1)
+    }
+    say("\(proposal.newName)  [\(proposal.kind.rawValue), \(proposal.namer.rawValue)]  (nothing renamed)")
 
 case "inspect":
     guard let file = args.first.map(path) else { say(usage); exit(1) }

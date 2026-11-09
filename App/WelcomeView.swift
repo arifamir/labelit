@@ -24,7 +24,7 @@ struct WelcomeView: View {
             }
 
             VStack(alignment: .leading, spacing: 10) {
-                Example(before: "Screenshot 2026-11-08 at 10.41.07.png", after: "stripe-checkout-payment-declined_2026-11-08_104107.png")
+                Example(before: "Screenshot 2026-11-08 at 10.41.07.png", after: "checkout-payment-declined_2026-11-08_104107.png")
                 Example(before: "IMG_4821.HEIC", after: "dog-beach-sunset_2026-11-02.heic")
             }
             .padding(14)

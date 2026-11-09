@@ -19,10 +19,10 @@ into names you can find later. The AI runs entirely on your Mac.
 
 | Before | After |
 |---|---|
-| `Screenshot 2026-11-08 at 10.41.07.png` | `stripe-checkout-payment-declined_2026-11-08_104107.png` |
+| `Screenshot 2026-11-08 at 10.41.07.png` | `checkout-payment-declined_2026-11-08_104107.png` |
 | `IMG_4821.HEIC` + `IMG_4821.MOV` (a Live Photo) | `dog-beach-sunset_lisbon_2026-11-02.heic` + `.mov` |
 | `IMG_6561.PNG` (an AirDropped iPhone screenshot) | `content-privacy-restrictions_2026-10-05.png` |
-| `IMG_2210.HEIC` (a photo of a receipt) | `receipt-blue-bottle-9-75_2026-11-02.heic` |
+| `IMG_2210.HEIC` (a photo of a receipt) | `receipt-corner-cafe-9-75_2026-11-02.heic` |
 | `unnamed.jpg` (right-click → Rename with LabelIt) | `office-portrait_2026-11-09.jpg` |
 
 ---
@@ -31,7 +31,7 @@ into names you can find later. The AI runs entirely on your Mac.
 
 macOS names every screenshot after the moment it was taken, and every photo you AirDrop from your
 iPhone arrives as `IMG_` plus a number. A week later, Downloads and Desktop are full of names that say
-nothing. Spotlight can't find "that Stripe error" when the file is called
+nothing. Spotlight can't find "that payment error" when the file is called
 `Screenshot 2026-11-08 at 10.41.07`.
 
 LabelIt watches for those files and gives each one a short, descriptive name as soon as it lands. It

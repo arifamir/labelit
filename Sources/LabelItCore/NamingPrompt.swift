@@ -6,8 +6,9 @@ public enum NamingPrompt {
     public static let instructions = """
     You name files on a user's computer so they can find them later. You get facts about one file: \
     what kind it is, which app or website it came from, text read from it, and objects seen in it. \
-    Reply with a short, specific name using only those facts. Prefer the most distinctive subject: \
-    the product, website, error message, merchant, animal, or scene. Never invent details.
+    Reply with a short, specific name using only those facts. When a window title or website is given, \
+    say which page or app it is; text read from the picture only adds detail. Prefer the most distinctive \
+    subject: the product, site, page, error, merchant, animal or scene. Never invent details.
     """
 
     /// Words that describe the file, not what's in it: every photo is a photo.
@@ -23,10 +24,19 @@ public enum NamingPrompt {
     /// Whether a model's name says enough. A document's name must carry at least one word of its main heading:
     /// "certificate-of-completion" alone doesn't say what the certificate is for.
     public static func isSpecificEnough(_ slug: String, for facts: FileFacts) -> Bool {
+        let words = Set(slug.split(separator: "-"))
+        // A browser screenshot's name must be about that page: share a word with its title or site. Otherwise the
+        // model went by some text inside the page (it latches onto the most prominent phrase), not by what the page is.
+        if let context = facts.context, context.url != nil {
+            let host = context.url.flatMap { URL(string: $0)?.host() } ?? ""
+            let pageWords = Set(Slug.make((context.windowTitle ?? "") + " " + host.replacingOccurrences(of: ".", with: " "),
+                                          maxWords: 40, maxLength: 400).split(separator: "-"))
+            if !pageWords.isEmpty && pageWords.isDisjoint(with: words) { return false }
+        }
         guard facts.isDocument, let heading = DocumentReading.heading(in: facts.analysis.lines) else { return true }
         let headingWords = Set(DocumentReading.slug(heading, maxWords: 12).split(separator: "-"))
         guard !headingWords.isEmpty else { return true }
-        return !headingWords.isDisjoint(with: slug.split(separator: "-"))
+        return !headingWords.isDisjoint(with: words)
     }
 
     public static func prompt(for facts: FileFacts, kind: FileKind) -> String {

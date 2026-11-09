@@ -40,10 +40,19 @@ public enum KindDetector {
             && money.numberOfMatches(in: text, range: range) >= 2
     }
 
+    /// The screen's error message, when the error is the point of the screenshot: the screen has little text, or the
+    /// line stands out (top half, larger than the body). A long page that merely mentions "declined" or "failed" (docs,
+    /// an article, a README) isn't an error screenshot.
     public static func errorLine(in lines: [TextLine]) -> TextLine? {
-        lines.first { line in
+        let errors = lines.filter { line in
             errorWords.firstMatch(in: line.text, range: NSRange(line.text.startIndex..., in: line.text)) != nil
         }
+        guard !errors.isEmpty else { return nil }
+        let words = lines.reduce(0) { $0 + $1.text.split(whereSeparator: \.isWhitespace).count }
+        if words <= 60 { return errors.first }
+        let heights = lines.map(\.height).sorted()
+        let median = heights[heights.count / 2]
+        return errors.first { $0.top < 0.5 && $0.height >= median * 1.15 }
     }
 }
 
@@ -116,14 +125,17 @@ public struct RuleNamer: Namer {
 
     private func screenSlug(_ facts: FileFacts) -> String {
         if let title = cleanTitle(facts.context?.windowTitle) {
-            let slug = Slug.make(title, maxWords: 6, maxLength: 50)
+            var slug = Slug.make(title, maxWords: 6, maxLength: 50)
+            // The site first when the title doesn't name it: github-arifamir-labelit.
+            if let site = Self.site(of: facts), !slug.isEmpty, !slug.split(separator: "-").contains(Substring(site)) {
+                slug = Slug.make(site + " " + slug, maxWords: 7, maxLength: 55)
+            }
             if !slug.isEmpty {
                 if let app = appSlug(facts), !slug.contains(app), !isBrowser(facts) { return app + "-" + slug }
                 return slug
             }
         }
-        if let host = facts.context?.url.flatMap({ URL(string: $0)?.host() }) {
-            let site = host.replacingOccurrences(of: "www.", with: "").split(separator: ".").first.map(String.init) ?? ""
+        if let site = Self.site(of: facts) {
             let heading = headingSlug(facts, maxWords: 4)
             return [site, heading].filter { !$0.isEmpty }.joined(separator: "-")
         }
@@ -207,7 +219,12 @@ public struct RuleNamer: Namer {
         for noise in Self.titleNoise where title.hasSuffix(noise) {
             title = String(title.dropLast(noise.count))
         }
-        // "Pricing | Stripe" → keep both, they're both useful.
+        // "owner/repo: A long description of it" (GitHub, and many sites): the name before the colon says it.
+        if let colon = title.range(of: ": ") {
+            let front = title[..<colon.lowerBound], rest = title[colon.upperBound...]
+            if front.split(separator: " ").count <= 4 && rest.split(separator: " ").count > 5 { title = String(front) }
+        }
+        // "Pricing | Acme" → keep both, they're both useful.
         return title.trimmingCharacters(in: .whitespaces)
     }
 
@@ -218,9 +235,19 @@ public struct RuleNamer: Namer {
         return slug.isEmpty ? nil : slug
     }
 
+    /// Browsers are the apps a page address comes from.
     private func isBrowser(_ facts: FileFacts) -> Bool {
+        if facts.context?.url != nil { return true }
         guard let id = facts.context?.bundleID else { return false }
         return BrowserBundleIDs.all.contains(id)
+    }
+
+    /// The site's name from the page address: "github" for https://github.com/…, "bbc" for www.bbc.co.uk.
+    static func site(of facts: FileFacts) -> String? {
+        guard let host = facts.context?.url.flatMap({ URL(string: $0)?.host() }) else { return nil }
+        let name = host.replacingOccurrences(of: "www.", with: "").split(separator: ".").first.map(String.init) ?? ""
+        let slug = Slug.make(name, maxWords: 1, maxLength: 20)
+        return slug.isEmpty ? nil : slug
     }
 }
 
