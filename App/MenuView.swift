@@ -6,6 +6,9 @@ struct MenuView: View {
     @Bindable var model: AppModel
     @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
+    /// The recent renames' full height, measured: the list is that tall, up to `maxListHeight`, then scrolls.
+    @State private var listHeight: CGFloat = 0
+    private let maxListHeight: CGFloat = 340
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -77,15 +80,19 @@ struct MenuView: View {
             .frame(maxWidth: .infinity)
             .padding(24)
         } else {
+            // A menu bar window takes its content's natural size, and a scroll view's natural height is next to
+            // nothing: given only a maximum, the list collapses to a sliver. So it gets the rows' measured height.
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 0) {
                     ForEach(model.recent) { entry in
                         RecentRow(entry: entry, model: model)
                         Divider().padding(.leading, 40)
                     }
                 }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
             }
-            .frame(maxHeight: 340)
+            .frame(height: min(max(listHeight, 1), maxListHeight))
+            .scrollBounceBehavior(.basedOnSize)
         }
     }
 
